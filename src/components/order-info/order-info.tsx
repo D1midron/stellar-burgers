@@ -1,8 +1,13 @@
-import { FC, useMemo } from 'react';
+import { FC, useMemo, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { useSelector } from '../../services/store';
+import { useDispatch, useSelector } from '../../services/store';
 import { getIngredientsState } from '../../services/slices/ingredientsSlice';
-import { getFeedOrdersState } from '../../services/slices/feedSlice';
+import {
+  getFeedOrdersState,
+  getOrderByNumberState,
+  fetchOrderByNumber,
+  clearOrderByNumber
+} from '../../services/slices/feedSlice';
 import { getProfileOrdersState } from '../../services/slices/profileOrdersSlice';
 import { Preloader } from '../ui/preloader';
 import { OrderInfoUI } from '../ui/order-info';
@@ -10,10 +15,29 @@ import { TIngredient } from '@utils-types';
 
 export const OrderInfo: FC = () => {
   const { number } = useParams<{ number: string }>();
+  const dispatch = useDispatch();
 
   const ingredients = useSelector(getIngredientsState);
   const feedOrders = useSelector(getFeedOrdersState);
   const profileOrders = useSelector(getProfileOrdersState);
+  const directOrderData = useSelector(getOrderByNumberState);
+
+  useEffect(() => {
+    if (!number) return;
+    const orderNumber = parseInt(number, 10);
+
+    const foundInStore =
+      feedOrders.find((item) => item.number === orderNumber) ||
+      profileOrders.find((item) => item.number === orderNumber);
+
+    if (!foundInStore) {
+      dispatch(fetchOrderByNumber(orderNumber));
+    }
+
+    return () => {
+      dispatch(clearOrderByNumber());
+    };
+  }, [number, feedOrders, profileOrders, dispatch]);
 
   const orderData = useMemo(() => {
     if (!number) return null;
@@ -22,8 +46,13 @@ export const OrderInfo: FC = () => {
     const foundInFeed = feedOrders.find((item) => item.number === orderNumber);
     if (foundInFeed) return foundInFeed;
 
-    return profileOrders.find((item) => item.number === orderNumber) || null;
-  }, [number, feedOrders, profileOrders]);
+    const foundInProfile = profileOrders.find(
+      (item) => item.number === orderNumber
+    );
+    if (foundInProfile) return foundInProfile;
+
+    return directOrderData;
+  }, [number, feedOrders, profileOrders, directOrderData]);
 
   const orderInfo = useMemo(() => {
     if (!orderData || !ingredients.length) return null;
