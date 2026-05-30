@@ -48,6 +48,17 @@ export const constructorSlice = createSlice({
         (item) => item.id !== action.payload
       );
     },
+
+    reorderIngredients: (
+      state,
+      action: PayloadAction<{ from: number; to: number }>
+    ) => {
+      const { from, to } = action.payload;
+      const ingredients = [...state.ingredients];
+      const [movedItem] = ingredients.splice(from, 1);
+      ingredients.splice(to, 0, movedItem);
+      state.ingredients = ingredients;
+    },
     closeOrderModal: (state) => {
       state.orderModalData = null;
     }
@@ -82,8 +93,12 @@ export const constructorSlice = createSlice({
   }
 });
 
-export const { addIngredient, removeIngredient, closeOrderModal } =
-  constructorSlice.actions;
+export const {
+  addIngredient,
+  removeIngredient,
+  reorderIngredients,
+  closeOrderModal
+} = constructorSlice.actions;
 
 export const getConstructorItemsState = (state: RootState) => ({
   bun: state.burgerConstructor.bun,
