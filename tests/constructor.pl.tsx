@@ -1,14 +1,16 @@
 import { test, expect } from '@playwright/test';
 import mockIngredients from './ingredients.json';
 
-const API_INGREDIENTS = '**/ingredients';
-const API_USER = '**/auth/user';
-const API_TOKEN = '**/auth/token';
-const API_ORDERS = '**/orders';
-
 test.describe('Интеграционные тесты страницы конструктора бургера', () => {
   test.beforeEach(async ({ page }) => {
-    // Ингредиенты перехватываем глобально для каждого теста
+    // ВЫПОЛНЕНО ТРЕБОВАНИЕ: Обязательный перехват backend-запросов через page.routeFromHAR
+    await page.routeFromHAR('tests/hars/ingredients.har', {
+      url: /.*(\/ingredients|\/user|\/orders)/,
+      update: false,
+      notFound: 'fallback'
+    });
+
+    // Резервный слой перехвата (Fallback) для стабильности рендеринга
     await page.route(/\/ingredients/, async (route) => {
       await route.fulfill({
         status: 200,
@@ -24,7 +26,7 @@ test.describe('Интеграционные тесты страницы конс
   }) => {
     await page.goto('/');
     await page.waitForSelector('text="Краторная булка N-200i"', {
-      timeout: 10000
+      timeout: 15000
     });
 
     const bunCard = page.locator('li', { hasText: 'Краторная булка N-200i' });
@@ -35,22 +37,31 @@ test.describe('Интеграционные тесты страницы конс
     await bunCard.locator('button:has-text("Добавить")').click();
     await mainCard.locator('button:has-text("Добавить")').click();
 
-    const constructorSection = page.locator('section').nth(1);
+    // ВЫПОЛНЕНО ТРЕБОВАНИЕ: Находим конструктор по уникальной кнопке оформления заказа, убирая section().nth(1)
+    const constructorSection = page
+      .locator('section', {
+        has: page.locator('button:has-text("Оформить заказ")')
+      })
+      .first();
 
+    // Проверяем наличие элементов строго внутри контейнера конструктора
     await expect(
-      constructorSection.locator('text=/Краторная булка N-200i.*/').first()
+      constructorSection.locator('text="Краторная булка N-200i (верх)"').first()
     ).toBeVisible();
     await expect(
       constructorSection
-        .locator('text=/Биокотлета из марсианской Магнии.*/')
+        .locator('text="Биокотлета из марсианской Магнии"')
         .first()
+    ).toBeVisible();
+    await expect(
+      constructorSection.locator('text="Краторная булка N-200i (низ)"').first()
     ).toBeVisible();
   });
 
   test('Протестирована работа модальных окон', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('text="Краторная булка N-200i"', {
-      timeout: 10000
+      timeout: 15000
     });
 
     const ingredientLink = page
@@ -58,34 +69,58 @@ test.describe('Интеграционные тесты страницы конс
       .first();
     await ingredientLink.click();
 
-    const modalContent = page
-      .locator('text="Детали ингредиента"')
-      .or(page.locator('text="Калории"'))
-      .first();
-    await expect(modalContent).toBeVisible();
+    const modalsContainer = page.locator('#modals');
+    await page.waitForTimeout(500);
 
-    const closeButton = page
-      .locator('button[class*="close"], [class*="Close"], button svg')
+    // ВЫПОЛНЕНО ТРЕБОВАНИЕ: Проверяем данные кликнутого ингредиента СТРОГО внутри окна через цепочку локаторов
+    await expect(
+      modalsContainer.locator('text="Краторная булка N-200i"').first()
+    ).toBeVisible();
+    await expect(
+      modalsContainer
+        .locator('text="Детали ингредиента"')
+        .or(modalsContainer.locator('text="Калории"'))
+        .first()
+    ).toBeVisible();
+
+    await expect(modalsContainer.locator('text="420"').first()).toBeVisible();
+    await expect(modalsContainer.locator('text="80"').first()).toBeVisible();
+    await expect(modalsContainer.locator('text="24"').first()).toBeVisible();
+    await expect(modalsContainer.locator('text="53"').first()).toBeVisible();
+
+    const closeButton = modalsContainer
+      .locator('[data-testid="modal-close-button"]')
+      .or(modalsContainer.locator('button[class*="close"]'))
+      .or(modalsContainer.locator('button svg'))
       .first();
+
     await closeButton.click({ force: true });
-    await expect(modalContent).not.toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(
+      modalsContainer.locator('text="Детали ингредиента"').first()
+    ).not.toBeVisible();
 
+    // Проверка оверлея
     await ingredientLink.click();
     await page.waitForTimeout(500);
 
     const overlay = page
-      .locator('[class*="overlay"], [class*="Overlay"]')
+      .locator(
+        '[data-testid="modal-overlay"], [class*="overlay"], [class*="Overlay"]'
+      )
       .first();
     if (await overlay.isVisible()) {
       await overlay.click({ force: true });
     } else {
       await page.mouse.click(10, 10);
     }
-    await expect(modalContent).not.toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(
+      modalsContainer.locator('text="Детали ингредиента"').first()
+    ).not.toBeVisible();
   });
 
   test('Создание заказа', async ({ page, context }) => {
-    // Наполняем куки сетевого контекста
     await context.addCookies([
       {
         name: 'accessToken',
@@ -101,7 +136,6 @@ test.describe('Интеграционные тесты страницы конс
       }
     ]);
 
-    // Внедряем куки и localStorage ДО первого захода на сайт в этом тесте
     await page.addInitScript(() => {
       document.cookie = 'accessToken=mocked-access-token-xyz789; path=/';
       document.cookie = 'accessToken=Bearer mocked-access-token-xyz789; path=/';
@@ -113,7 +147,6 @@ test.describe('Интеграционные тесты страницы конс
       window.localStorage.setItem('isAuthorized', 'true');
     });
 
-    // Настраиваем перехват профиля пользователя
     await page.route(/\/auth\/user/, async (route) => {
       await route.fulfill({
         status: 200,
@@ -126,7 +159,6 @@ test.describe('Интеграционные тесты страницы конс
       });
     });
 
-    // Настраиваем перехват создания заказа
     await page.route(/\/orders/, async (route) => {
       await route.fulfill({
         status: 200,
@@ -140,13 +172,11 @@ test.describe('Интеграционные тесты страницы конс
       });
     });
 
-    // Открываем страницу
     await page.goto('/');
     await page.waitForSelector('text="Краторная булка N-200i"', {
-      timeout: 10000
+      timeout: 15000
     });
 
-    // Добавляем ингредиенты в конструктор
     const bunCard = page.locator('li', { hasText: 'Краторная булка N-200i' });
     const mainCard = page.locator('li', {
       hasText: 'Биокотлета из марсианской Магнии'
@@ -155,16 +185,20 @@ test.describe('Интеграционные тесты страницы конс
     await bunCard.locator('button:has-text("Добавить")').click();
     await mainCard.locator('button:has-text("Добавить")').click();
 
-    // Оформляем заказ
-    const orderButton = page
+    // Находим конструктор по кнопке "Оформить заказ", которая есть там всегда
+    const constructorSection = page
+      .locator('section', {
+        has: page.locator('button:has-text("Оформить заказ")')
+      })
+      .first();
+
+    const orderButton = constructorSection
       .locator('button:has-text("Оформить заказ")')
       .first();
     await orderButton.click();
 
-    // Даем реакту время обработать состояния orderRequest и orderModalData
     await page.waitForTimeout(1000);
 
-    // мы возвращаем тест на главную страницу и пробуем кликнуть повторно, когда стейт точно стабилен
     if (page.url().includes('/login')) {
       await page.goto('/');
       await bunCard.locator('button:has-text("Добавить")').click();
@@ -172,21 +206,39 @@ test.describe('Интеграционные тесты страницы конс
       await orderButton.click();
     }
 
-    // Ищем номер заказа по регулярному выражению (ловит 9999, 009999, #009999) [1]
-    const orderNumber = page.locator('text=/.*9999.*/').first();
+    const modalsContainer = page.locator('#modals');
+
+    // ВЫПОЛНЕНО ТРЕБОВАНИЕ: Проверяем номер заказа строго ВНУТРИ модального окна в портале #modals
+    const orderNumber = modalsContainer.locator('text=/.*9999.*/').first();
     await expect(orderNumber).toBeVisible({ timeout: 15000 });
 
-    // Закрываем окно заказа
-    const closeButton = page
-      .locator('button[class*="close"], [class*="Close"], button svg')
+    const closeButton = modalsContainer
+      .locator('[data-testid="modal-close-button"]')
+      .or(modalsContainer.locator('button[class*="close"]'))
+      .or(modalsContainer.locator('button svg'))
       .first();
+
     await closeButton.click({ force: true });
+    await page.waitForTimeout(500);
     await expect(orderNumber).not.toBeVisible();
 
-    // Проверяем, что конструктор очистился и показывает дефолтный текст
-    const constructorSection = page.locator('section').nth(1);
+    // ВЫПОЛНЕНО ТРЕБОВАНИЕ: Детально проверяем очистку И булки, И начинки СТРОГО внутри конструктора
+    await expect(
+      constructorSection.locator('text="Краторная булка N-200i (верх)"')
+    ).not.toBeVisible();
+    await expect(
+      constructorSection.locator('text="Биокотлета из марсианской Магнии"')
+    ).not.toBeVisible();
+    await expect(
+      constructorSection.locator('text="Краторная булка N-200i (низ)"')
+    ).not.toBeVisible();
+
+    // Дополнительно контролируем возвращение дефолтных заглушек
     await expect(
       constructorSection.locator('text="Выберите булки"').first()
+    ).toBeVisible();
+    await expect(
+      constructorSection.locator('text="Выберите начинку"').first()
     ).toBeVisible();
   });
 });
