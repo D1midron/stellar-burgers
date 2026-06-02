@@ -10,7 +10,9 @@ export const IngredientsCategory = forwardRef<
   const ingredientsCounters = useMemo(() => {
     const counters: { [key: string]: number } = {};
     ingredients.forEach((ingredient: any) => {
-      counters[ingredient._id] = ingredient.count || 0;
+      if (ingredient.count > 0) {
+        counters[ingredient._id] = ingredient.count;
+      }
     });
     return counters;
   }, [ingredients]);
